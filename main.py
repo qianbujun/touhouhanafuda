@@ -498,7 +498,8 @@ def score(player,ids):
     if all(spot in spot_names for spot in faith_spots):
         total_score += 5
         yizhong.append("信仰战争")
-    
+        if "巫女组" in yizhong :
+            yizhong.remove("巫女组")
     
     
     
@@ -570,7 +571,7 @@ def test_once_play(player1name, player2name):
     field = deck[:8]
     ids = []
     deck = deck[8:]
-    print(f"\033[0;30;42m场上的牌: {[str(card.name) for card in field]}")
+    print(f"\033[0;30;42m场上的牌: {[str(card.name) for card in field]}\033[0m")
     if(checkdeck(field)):
             print("\033[0;30;47m场上有四张相同的牌，流局\033[0m")
             
