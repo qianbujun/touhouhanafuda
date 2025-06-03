@@ -39,6 +39,18 @@ yrn_combinations = {
     "不死组": {"chars": ["蓬莱山辉夜", "藤原妹红"], "scenes": ["迷失竹林的月圆之夜"]}
 }
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        # For one-folder builds, _MEIPASS is not set, and files are relative to exe
+        # For one-file builds, _MEIPASS is the temp extraction folder
+        base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    except Exception:
+        base_path = os.path.abspath(".") # Fallback
+
+    return os.path.join(base_path, relative_path)
+
 
 # --- Helper functions from main.py (adapted for GUI) ---
 def build_pair_matrix(hand_cards):
@@ -266,7 +278,9 @@ BLUE = (0, 0, 200)
 YELLOW = (255, 255, 0)
 LIGHT_BLUE = (173, 216, 230)
 
-ASSET_PATH = "assets/cards"
+#ASSET_PATH = "assets/cards"
+
+ASSET_PATH = resource_path("assets/cards") # NEW
 card_images = {}
 card_back_image = None
 font = None
@@ -954,33 +968,52 @@ def main_gui():
     global font, small_font, tiny_font # Make sure these are global
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-    pygame.display.set_caption("Touhou Card Game")
+    pygame.display.set_caption("TouhouHanafuda")
     
-    font_path = None # Use default if path is None
-    # Try to find a common CJK font. "msyh.ttc" (Microsoft YaHei) is common on Windows.
-    # On Linux, "Noto Sans CJK JP" or similar. On macOS, "PingFang.ttc".
-    # For simplicity, user should place a 'sc.ttf' or similar in the game directory.
-    font_paths_to_try = ["sc.ttf", "msyh.ttc", "ヒラギノ角ゴシック W3.ttc", None] # None for pygame default
+
+    bundled_font_name = "sc.ttf" # The name of your font file
+    font_path_primary_bundled = resource_path(bundled_font_name)
+
+    # System fonts to try as fallbacks if the bundled one fails or is not found
+    system_fonts_fallback = [ None] # None for pygame default
+
+    font_loaded = False
+    # Try bundled font first
+    try:
+        font = pygame.font.Font(font_path_primary_bundled, 28)
+        small_font = pygame.font.Font(font_path_primary_bundled, 20)
+        tiny_font = pygame.font.Font(font_path_primary_bundled, 16)
+        print(f"Using bundled font: {font_path_primary_bundled}")
+        font_loaded = True
+    except pygame.error as e:
+        print(f"Bundled font '{bundled_font_name}' not found or failed to load from '{font_path_primary_bundled}'. Error: {e}")
+        print("Attempting system fallback fonts...")
+
+    if not font_loaded:
+        for fp_try in system_fonts_fallback:
+            try:
+                font = pygame.font.Font(fp_try, 28)
+                small_font = pygame.font.Font(fp_try, 20)
+                tiny_font = pygame.font.Font(fp_try, 16)
+                print(f"Using system/default font: {fp_try if fp_try else 'Pygame Default'}")
+                font_loaded = True
+                break
+            except pygame.error:
+                if fp_try is None:
+                    print("CRITICAL Error: Pygame default font also failed to load.")
+                    pygame.quit()
+                    sys.exit()
+                # print(f"System font {fp_try} not found or failed.")
+                continue
     
-    for fp_try in font_paths_to_try:
-        try:
-            font = pygame.font.Font(fp_try, 28) 
-            small_font = pygame.font.Font(fp_try, 20) 
-            tiny_font = pygame.font.Font(fp_try, 16)
-            print(f"Using font: {fp_try if fp_try else 'Pygame Default'}")
-            break 
-        except pygame.error:
-            if fp_try is None : # If default font fails, something is very wrong
-                print("Error: Pygame default font failed to load.")
-                pygame.quit()
-                sys.exit()
-            # print(f"Font {fp_try} not found or failed to load.")
-            continue # Try next font
-        except Exception as e: # Catch other font loading errors
-            print(f"An unexpected error occurred while loading font {fp_try}: {e}")
-            continue
+    if not font_loaded: # Should not happen if default font (None) works
+        print("CRITICAL: No suitable font could be loaded. Exiting.")
+        pygame.quit()
+        sys.exit()
 
-
+    load_images() 
+    
+    
     load_images()
     if not card_back_image and not card_images: # Critical load fail
         print("CRITICAL: Failed to load essential card images/backs. Exiting.")
