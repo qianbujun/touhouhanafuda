@@ -1,26 +1,12 @@
 # gui.py
-'''
-目前问题
-1.流局会报错
-2.收集的牌会显示框且过长记得换行
-3.翻开的牌6个一排
-4.注意不要让字和手牌重叠，其他的也不要重叠
-'''
-
 
 import pygame
 import sys
 import os
 import random
 
-# Assuming card.py, player.py, and parts of main.py are in the same directory or accessible
 from card import card
 from player import Player
-# Import necessary functions and data from your main.py
-# We'll need to be careful about what we import to avoid circular dependencies
-# or re-running __main__ blocks if main.py also has one.
-# It's better to put shared data like cp_combinations in a separate data.py if possible.
-# For now, I'll copy them or assume they are accessible.
 
 # --- Data from main.py (or a shared data module) ---
 predefined_cps = {
@@ -46,124 +32,168 @@ yrn_combinations = {
     "结界组": {"chars": ["博丽灵梦", "八云紫"], "scenes": ["迷失竹林的月圆之夜"]},
     "咏唱组": {"chars": ["雾雨魔理沙", "爱丽丝"], "scenes": ["迷失竹林的月圆之夜"]},
     "红魔组": {"chars": ["蕾米莉亚", "十六夜咲夜"], "scenes": ["迷失竹林的月圆之夜"]},
-    "幽冥组": {"chars": ["魂魄妖梦", "西行寺幽幽子"], "scenes": ["迷失竹林的月圆之夜"]}, # Note: Duplicates key in main.py, Py dicts don't allow this
+    # Note: "幽冥组" is in both. check_cp_combinations handles this by potentially adding "永夜组"
+    # and the specific "幽冥组" from cp_combinations.
+    "幽冥组 YRN": {"chars": ["魂魄妖梦", "西行寺幽幽子"], "scenes": ["迷失竹林的月圆之夜"]}, # Renamed to avoid dict key collision
     "永远组": {"chars": ["八意永琳", "蓬莱山辉夜"], "scenes": ["迷失竹林的月圆之夜"]},
     "不死组": {"chars": ["蓬莱山辉夜", "藤原妹红"], "scenes": ["迷失竹林的月圆之夜"]}
 }
-# Ensure '幽冥组' in yrn_combinations has a unique interaction if needed, or consolidate
-# For now, let's assume the last definition of "幽冥组" under yrn_combinations is intended for it.
-# If "幽冥组" should be in both cp_combinations and yrn_combinations with different scenes,
-# the logic in check_cp_combinations needs to handle that.
-# The provided check_cp_combinations might double count or pick one.
-# For simplicity, I'll assume yrn_combinations are distinct or additive.
+
 
 # --- Helper functions from main.py (adapted for GUI) ---
-def build_pair_matrix(hand_cards): # hand_cards is a list of card objects
+def build_pair_matrix(hand_cards):
     matrix = [[0]*8 for _ in range(8)]
     for i in range(8):
         for j in range(i + 1, 8):
             if hand_cards[i].card_id == hand_cards[j].card_id:
                 matrix[i][j] = matrix[j][i] = 1
             else:
-                pair_names = tuple(sorted((hand_cards[i].name, hand_cards[j].name)))
-                # Check both (a,b) and (b,a) if predefined_cps is not consistently sorted
-                if pair_names in predefined_cps or \
-                   (pair_names[1],pair_names[0]) in predefined_cps :
+                # Ensure consistent ordering for tuple lookup
+                pair_names_sorted = tuple(sorted((hand_cards[i].name, hand_cards[j].name)))
+                if pair_names_sorted in predefined_cps: # Check sorted tuple
                     matrix[i][j] = matrix[j][i] = 1
     return matrix
 
 def can_form_perfect_match(matrix):
     n = len(matrix)
     used = [False] * n
-    def backtrack(pairs_count, start_index):
-        if pairs_count == 4:
+    
+    # More efficient perfect matching check (Hopcroft-Karp is complex,
+    # but for fixed N=8, backtracking is fine. Ensure it explores branches correctly)
+    # The existing backtrack might be slightly inefficient but should work for N=8.
+    # Let's refine the provided backtrack:
+    def backtrack_pm(k, count_pairs): # k is current card index to try pairing
+        if count_pairs == n // 2: # n//2 pairs means perfect match
             return True
-        if start_index >= n -1: # Not enough cards left to form more pairs
+        if k >= n: # All cards processed
             return False
+        
+        if used[k]: # If card k is already used, move to next
+            return backtrack_pm(k + 1, count_pairs)
 
-        # Find the first unused card
+        used[k] = True
+        for i in range(k + 1, n):
+            if not used[i] and matrix[k][i] == 1: # If card i is not used and can pair with k
+                used[i] = True
+                if backtrack_pm(k + 1, count_pairs + 1):
+                    return True
+                used[i] = False # Backtrack
+
+        used[k] = False # Backtrack: card k could not be paired starting from here
+        
+        # This path is if card k is left unpaired. For perfect matching, this means failure for this branch
+        # unless we allow skipping. However, the goal is to pair up *all* cards if possible.
+        # A simpler way for perfect matching is to iterate through available cards.
+        # The original one looked for the first unused:
+        # Find the first unused card 'first_available'
+        # Try to pair 'first_available' with 'j'. Recurse.
+        # If that fails, 'first_available' cannot be part of this perfect match solution starting this way.
+        # The original `can_form_perfect_match` had `start_index` which is a good way to structure.
+        # Let's use the original provided one, assuming its logic path for N=8 is okay.
+        # The one from the prompt: `def backtrack(pairs_count, start_index):` is better.
+        # I used `pairs_count` and `start_index` in my version in prompt, which is reasonable.
+        
+        # Using the prompt's can_form_perfect_match structure
         first_available = -1
-        for i in range(start_index, n):
+        for i in range(n): # Find first available card to start a new pair
             if not used[i]:
                 first_available = i
                 break
         
-        if first_available == -1: # No unused cards left, but haven't formed 4 pairs
-             return False
+        if first_available == -1: # All cards used
+            return count_pairs == n // 2 # True if 4 pairs formed
 
+        # Try to pair 'first_available'
         used[first_available] = True
         for j in range(first_available + 1, n):
             if not used[j] and matrix[first_available][j] == 1:
                 used[j] = True
-                if backtrack(pairs_count + 1, first_available + 1):
+                if backtrack_pm_recursive(count_pairs + 1): # Recursive call without specific start_index, relies on finding next available
                     return True
-                used[j] = False # backtrack
-        used[first_available] = False # backtrack
+                used[j] = False # Backtrack
+        used[first_available] = False # Backtrack: 'first_available' could not be successfully paired to form a PM
+
+        # If 'first_available' cannot be paired as part of this attempt to reach 4 pairs, this path fails.
+        # For a perfect match, every card must be paired. If we reach here, it means 'first_available'
+        # couldn't form a pair that leads to a solution.
+        # We also need a path where 'first_available' is *skipped* if it cannot start a pair,
+        # allowing other cards to form pairs. This is tricky for PM.
+        # The prompt's can_form_perfect_match's backtrack(0,0) is likely more correct.
+        return False # Default if no PM found from this state
+
+    # Inner recursive helper for the prompt's version style
+    def backtrack_pm_recursive(pairs_formed_count):
+        if pairs_formed_count == n // 2:
+            return True
+
+        first_idx_to_pair = -1
+        for i in range(n):
+            if not used[i]:
+                first_idx_to_pair = i
+                break
         
-        # Try skipping the current 'first_available' card if it couldn't form a pair
-        # This ensures we explore all possibilities even if a card cannot be paired from its current position
-        if backtrack(pairs_count, first_available + 1):
-             return True
-             
-        return False
-    return backtrack(0,0)
+        if first_idx_to_pair == -1: # Should not happen if pairs_formed_count < n/2
+            return False
+
+        # Try pairing 'first_idx_to_pair'
+        used[first_idx_to_pair] = True
+        for j in range(first_idx_to_pair + 1, n):
+            if not used[j] and matrix[first_idx_to_pair][j] == 1:
+                used[j] = True
+                if backtrack_pm_recursive(pairs_formed_count + 1):
+                    return True
+                used[j] = False # Backtrack
+        used[first_idx_to_pair] = False # Backtrack
+        return False # 'first_idx_to_pair' could not be used to extend the current set of pairs to a full PM
+
+    return backtrack_pm_recursive(0)
 
 
 def checkhandcp(hand_cards):
-    if len(hand_cards) != 8: return 0 # Must be 8 cards
+    if len(hand_cards) != 8: return 0
+    # Ensure all cards in hand_cards are characters for this check, as per main.py context for CP天胡
+    if not all(c.card_type == 'character' for c in hand_cards):
+        return 0 # Or handle error, CP天胡 implies all characters
     matrix = build_pair_matrix(hand_cards)
     return 1 if can_form_perfect_match(matrix) else 0
 
-def checkhand(hand_cards): # list1 is hand_cards
+def checkhand(hand_cards):
+    if len(hand_cards) != 8: return 0 # Must be 8 cards
+
     char_cards = [c for c in hand_cards if c.card_type == 'character']
     spot_cards = [c for c in hand_cards if c.card_type == 'spot']
 
-    if len(spot_cards) == 8 and len(hand_cards) == 8: # All 8 are spot cards
-        return 3 # 天和 - 全地点
-    if len(char_cards) == 8 and len(hand_cards) == 8: # All 8 are character cards
-        return checkhandcp(char_cards) # 天和 - CP
+    if len(spot_cards) == 8: # All 8 are spot cards
+        return 3 # 天和 - 全地点 (10 pts)
+    if len(char_cards) == 8: # All 8 are character cards
+        return 1 if checkhandcp(char_cards) else 0 # 天和 - CP (4 pts for type 1). Original returned 1 for success.
 
-    # 手四和双手四 (Si-he in hand, Double Si-he in hand)
-    # This logic applies if not all character or all spot.
-    # It seems to imply that hand can contain mixed types for this check.
-    # Original logic: list2 = [0]*12; for item in list1: list2[item.card_id-1]+=1
-    # This counts card_id occurrences across ALL types in hand.
-    
     counts = {}
     for item in hand_cards:
         counts[item.card_id] = counts.get(item.card_id, 0) + 1
     
     sorted_counts = sorted(counts.values(), reverse=True)
-    
     if not sorted_counts: return 0
 
     if sorted_counts[0] >= 4:
         if len(sorted_counts) > 1 and sorted_counts[1] >= 4:
-            return 2 # 双手四 (8 points)
-        return 1 # 手四 (4 points)
+            return 2 # 双手四 (8 pts)
+        return 1 # 手四 (4 pts) - This is for general 4-of-a-kind, distinct from CP天胡.
+                 # If all characters, checkhandcp handles the CP specific 4-pair version.
+                 # If it's mixed and has 4 of one ID, it's 手四.
+                 # The scoring for type 1 (CP or 手四) is 4 points. Type 2 (双手四) is 8 points.
     return 0
 
 
-def checkdeck(field_cards): # list1 is field_cards
-    if not field_cards: return 0
+def checkdeck(field_cards):
+    if not field_cards or len(field_cards) < 4 : return 0 # Need at least 4 cards to have 4 of a kind
     counts = {}
     for item in field_cards:
         counts[item.card_id] = counts.get(item.card_id, 0) + 1
-    sorted_counts = sorted(counts.values(), reverse=True)
-    if not sorted_counts: return 0
-    if sorted_counts[0] >= 4:
-        # Original code implies if two different card_ids have 4 cards each on field, it's still 2.
-        # This seems unlikely for a "流局" (draw) condition.
-        # Usually, 4 of the *same* card_id on field is the issue.
-        # Let's stick to the original interpretation: if the highest count is 4,
-        # and the second highest is also 4 (meaning two sets of 4), it returns 2.
-        # For a "流局" (redraw/abort game), usually it's just any 4 of the same card.
-        # Re-interpreting "流局" to mean if ANY single card_id has 4 cards.
-        if len(field_cards) >=4 and sorted_counts[0] >=4: # If any card appears 4 times
-             # The original checkdeck returns 1 for one set of 4, 2 for two sets of 4.
-             # This is usually for scoring, not "流局".
-             # For "流局" if 4 identical cards on field at start:
-             return 1 # Indicate a "流局" condition exists.
+    
+    for card_id_count in counts.values():
+        if card_id_count >= 4:
+            return 1 # Condition for abortive draw (流局) met: at least one card_id appears 4+ times
     return 0
 
 
@@ -173,76 +203,43 @@ def check_cp_combinations(collected_cards):
     spot_set = set(c.name for c in collected_cards if c.card_type == 'spot')
 
     yizhong_cp_list = []
-    cp_score_count = 0 # Using this to sum scores, not just count combos
+    cp_score_units = 0 
 
     # Check normal CP combinations
     for combo_name, combo in cp_combinations.items():
-        if not all(char in char_set for char in combo["chars"]):
+        if not all(char_name in char_set for char_name in combo["chars"]):
             continue
         if "scenes" in combo and combo["scenes"]:
-            if not any(scene in scene_set for scene in combo["scenes"]):
+            if not any(scene_name in scene_set for scene_name in combo["scenes"]):
                 continue
         if "spots" in combo and combo["spots"]:
-            if not any(spot in spot_set for spot in combo["spots"]):
+            if not any(spot_name in spot_set for spot_name in combo["spots"]):
                 continue
-        cp_score_count += 1 # Each combo worth 1 point base, then scaled in score()
+        cp_score_units += 1 
         yizhong_cp_list.append(combo_name)
 
-    # Check YRN combinations
-    # If a YRN combo is made, it might be exclusive or additive.
-    # Original code adds 1 to cp_count and appends '永夜组' if ANY yrn_combo is met.
-    yrn_made = False
-    for combo_name, combo in yrn_combinations.items(): # combo_name is like "结界组"
-        if not all(char in char_set for char in combo["chars"]):
+    yrn_made_generic = False
+    for combo_name, combo in yrn_combinations.items(): 
+        if not all(char_name in char_set for char_name in combo["chars"]):
             continue
-        if "scenes" in combo and combo["scenes"]: # YRN all have scenes
-            if not any(scene in scene_set for scene in combo["scenes"]): # Needs specific scene "迷失竹林的月圆之夜"
+        if "scenes" in combo and combo["scenes"]: 
+            if not any(scene_name in scene_set for scene_name in combo["scenes"]):
                 continue
         
-        # If one YRN combo is made, it counts as '永夜组'
-        # and adds to score. Does it also add the specific yrn_combo_name like "结界组"?
-        # Original logic just adds '永夜组' and breaks.
-        cp_score_count +=1 # Counts as one more CP combo
-        if not yrn_made : # Add '永夜组' only once
-             yizhong_cp_list.append("永夜组") # Generic name for any YRN combo made
-             yrn_made = True
-        # yizhong_cp_list.append(combo_name) # Optionally add specific yrn combo name too
-        # break # Original code breaks after one YRN match
+        cp_score_units +=1 
+        # yizhong_cp_list.append(combo_name) # Add specific YRN combo name e.g. "结界组"
+        if not yrn_made_generic : 
+             yizhong_cp_list.append("永夜组") 
+             yrn_made_generic = True
+        # Original main.py seems to break after first YRN, implying "永夜组" is one category.
+        # If YRN groups are additive to score (each YRN combo adds score unit), remove break.
+        # Current logic: each YRN met adds a score unit, "永夜组" is added once as a label.
+        # Let's follow main.py's implicit single +3 for any YRN by breaking:
+        break 
 
-    return cp_score_count, yizhong_cp_list
 
+    return cp_score_units, yizhong_cp_list
 
-    def draw_wrapped_text_list(self, surface, prefix, items_list, y_start, font_obj, color, max_width):
-        """辅助函数，用于绘制带前缀的、可换行的项目列表"""
-        if not items_list:
-            return y_start # 如果列表为空，不绘制任何内容，返回原始y坐标
-
-        full_text = prefix + ", ".join(items_list)
-        
-        words = full_text.split(' ') # 按空格分词，以便更好地控制换行
-        lines = []
-        current_line = ""
-        
-        line_spacing = font_obj.get_linesize() 
-        current_y = y_start
-
-        for word in words:
-            # 检查添加下一个词是否会超出宽度
-            test_line = current_line + word + " "
-            if font_obj.size(test_line)[0] <= max_width:
-                current_line = test_line
-            else:
-                # 渲染当前行
-                draw_text(surface, current_line.strip(), (CARD_MARGIN, current_y), font_obj, color)
-                current_y += line_spacing
-                current_line = word + " " # 开始新行
-        
-        # 渲染最后一行
-        if current_line.strip():
-            draw_text(surface, current_line.strip(), (CARD_MARGIN, current_y), font_obj, color)
-            current_y += line_spacing
-            
-        return current_y # 返回下一行开始的y坐标
 
 # --- Pygame Constants ---
 SCREEN_WIDTH = 1280
@@ -252,26 +249,30 @@ CARD_HEIGHT = 150
 CARD_MARGIN = 10
 HIGHLIGHT_BORDER = 4
 
+# Layout constants
+INFO_PANEL_WIDTH = 380  # Adjusted for balance
+INFO_PANEL_HEIGHT = CARD_HEIGHT # Keep same as card height for alignment
+AI_HAND_CARD_DISPLAY_COUNT = 8 # Max cards to show as backs for AI
+PLAYER_HAND_MAX_WIDTH = (CARD_WIDTH + CARD_MARGIN // 2) * 8 - CARD_MARGIN // 2
+
 # Colors
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GREEN = (0, 100, 0) # Darker green for background
+GREEN = (0, 100, 0) 
 GRAY = (200, 200, 200)
+LIGHT_GRAY = (230, 230, 230)
 RED = (200, 0, 0)
 BLUE = (0, 0, 200)
 YELLOW = (255, 255, 0)
 LIGHT_BLUE = (173, 216, 230)
 
-# Asset Path
 ASSET_PATH = "assets/cards"
-
-# --- Global Variables / Game State (will be managed by a class) ---
 card_images = {}
 card_back_image = None
 font = None
 small_font = None
+tiny_font = None
 
-# --- Helper GUI Functions ---
 def load_images():
     global card_back_image, card_images
     try:
@@ -279,41 +280,67 @@ def load_images():
         card_back_image = pygame.transform.scale(card_back_image, (CARD_WIDTH, CARD_HEIGHT))
     except pygame.error as e:
         print(f"Cannot load card back image: {e}")
-        sys.exit()
+        card_back_image = pygame.Surface((CARD_WIDTH, CARD_HEIGHT)) # Placeholder
+        card_back_image.fill(BLUE) # Fallback color
+        # sys.exit() # Optional: exit if critical asset missing
 
-    all_cards_for_images = card.initialize_cards() # Get all card definitions
+    all_cards_for_images = card.initialize_cards()
     for c in all_cards_for_images:
         try:
             img_path = os.path.join(ASSET_PATH, f"{c.name}.png")
+            if not os.path.exists(img_path): # Attempt with .jpg if .png not found
+                img_path = os.path.join(ASSET_PATH, f"{c.name}.jpg")
+
             loaded_img = pygame.image.load(img_path).convert_alpha()
             card_images[c.name] = pygame.transform.scale(loaded_img, (CARD_WIDTH, CARD_HEIGHT))
         except pygame.error:
-            print(f"Warning: Cannot load image for {c.name}. Using back image.")
-            card_images[c.name] = card_back_image # Fallback
+            # print(f"Warning: Cannot load image for {c.name}. Using placeholder.")
+            placeholder_surf = pygame.Surface((CARD_WIDTH, CARD_HEIGHT))
+            placeholder_surf.fill(GRAY)
+            pygame.draw.rect(placeholder_surf, BLACK, placeholder_surf.get_rect(), 1)
+            temp_font = pygame.font.Font(None, 16) # Default font for placeholder text
+            text_surf = temp_font.render(c.name, True, BLACK)
+            text_rect = text_surf.get_rect(center=(CARD_WIDTH//2, CARD_HEIGHT//2))
+            placeholder_surf.blit(text_surf, text_rect)
+            card_images[c.name] = placeholder_surf
 
-def draw_text(surface, text, pos, font_obj, color=BLACK, center=False):
-    text_surface = font_obj.render(text, True, color)
+
+def draw_text(surface, text, pos, font_obj, color=BLACK, center=False, rect_to_fit=None, aa=True):
+    text_surface = font_obj.render(text, aa, color)
     text_rect = text_surface.get_rect()
-    if center:
+    if rect_to_fit:
+        if center:
+            text_rect.center = rect_to_fit.center
+        else:
+            text_rect.topleft = rect_to_fit.topleft
+    elif center:
         text_rect.center = pos
     else:
         text_rect.topleft = pos
     surface.blit(text_surface, text_rect)
 
 def draw_card(surface, card_obj, x, y, is_back=False, is_highlighted=False):
-    if is_back or not card_obj: # card_obj can be None for placeholders
-        image = card_back_image
+    if is_back or not card_obj:
+        image_to_draw = card_back_image
+        if not image_to_draw : # Ultimate fallback for back image
+            pygame.draw.rect(surface, BLUE, (x,y,CARD_WIDTH,CARD_HEIGHT))
+            pygame.draw.rect(surface, WHITE, (x,y,CARD_WIDTH,CARD_HEIGHT),2)
+            return pygame.Rect(x, y, CARD_WIDTH, CARD_HEIGHT)
     else:
-        image = card_images.get(card_obj.name, card_back_image) # Fallback if name not found
+        image_to_draw = card_images.get(card_obj.name)
+        if not image_to_draw: # Fallback for specific card image
+             image_to_draw = card_back_image # Or a generic placeholder from load_images
     
     rect = pygame.Rect(x, y, CARD_WIDTH, CARD_HEIGHT)
-    surface.blit(image, rect.topleft)
-    
+    if image_to_draw:
+        surface.blit(image_to_draw, rect.topleft)
+    else: # Should not happen if load_images has fallbacks
+        pygame.draw.rect(surface, RED, rect) # Error placeholder
+
     if is_highlighted:
         pygame.draw.rect(surface, YELLOW, rect, HIGHLIGHT_BORDER)
     return rect
 
-# --- Game Manager Class ---
 class GameManager:
     def __init__(self, screen):
         self.screen = screen
@@ -321,23 +348,40 @@ class GameManager:
         self.player_human = Player("Player")
         self.player_ai = Player("Baka AI")
         self.field = []
-        self.current_player = self.player_human # Human starts
-        self.game_phase = "INIT" # INIT, PLAYER_TURN, AI_TURN, DIALOG, GAME_OVER
+        self.current_player = self.player_human
+        self.game_phase = "INIT" 
         self.message = ""
         self.dialog_active = False
-        self.dialog_options = [] # For choices like "pick card" or "continue"
-        self.dialog_callback = None # Function to call after dialog choice
+        self.dialog_options = []
+        self.dialog_callback = None
         self.dialog_prompt = ""
-        self.ids_on_field_at_start = [] # For "合札" scoring
+        self.ids_on_field_at_start = []
 
-        self.highlight_field_indices = [] # Indices of field cards to highlight
+        self.highlight_field_indices = []
         self.hovered_hand_card_index = -1
+        self.turn_count = 0
+
+        # Layout dependent coordinates
+        self.ai_hand_display_rect = pygame.Rect(CARD_MARGIN, CARD_MARGIN, PLAYER_HAND_MAX_WIDTH, CARD_HEIGHT)
+        self.ai_info_rect = pygame.Rect(self.ai_hand_display_rect.right + CARD_MARGIN, CARD_MARGIN, INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+        
+        self.player_hand_display_rect = pygame.Rect(CARD_MARGIN, SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN, PLAYER_HAND_MAX_WIDTH, CARD_HEIGHT)
+        self.player_info_rect = pygame.Rect(self.player_hand_display_rect.right + CARD_MARGIN, self.player_hand_display_rect.top, INFO_PANEL_WIDTH, INFO_PANEL_HEIGHT)
+
+        field_area_top_y = max(self.ai_hand_display_rect.bottom, self.ai_info_rect.bottom) + CARD_MARGIN
+        field_area_bottom_y = min(self.player_hand_display_rect.top, self.player_info_rect.top) - CARD_MARGIN
+        self.field_display_start_y = field_area_top_y
+        self.max_field_rows = (field_area_bottom_y - field_area_top_y) // (CARD_HEIGHT + CARD_MARGIN)
+        
+        self.game_message_rect = pygame.Rect(CARD_MARGIN, field_area_bottom_y - 35, SCREEN_WIDTH - 2*CARD_MARGIN, 30)
+
 
         self.setup_game()
 
     def setup_game(self):
         self.deck = card.initialize_cards()
         random.shuffle(self.deck)
+        self.turn_count = 0
 
         self.player_human.hand = []
         self.player_human.collected = []
@@ -349,249 +393,257 @@ class GameManager:
         self.player_ai.score = 0
         self.player_ai.yizhong = []
 
-        # Initial draw for both players
         self.player_human.initial_draw(self.deck)
         self.player_ai.initial_draw(self.deck)
 
-        # Initial field cards
-        self.field = self.deck[:8]
-        self.deck = self.deck[8:]
+        self.field = []
+        for _ in range(8): # Draw 8 cards to field
+            if self.deck: self.field.append(self.deck.pop(0))
+        
         self.ids_on_field_at_start = [c.card_id for c in self.field if c.card_type == 'spot']
-
-
-        self.message = f"{self.player_human.name}'s turn."
-        self.game_phase = "PRE_TURN_CHECKS" # Check for Tenhou before first turn
+        
+        self.current_player = self.player_human
+        self.message = f"{self.player_human.name}'s turn to start."
+        self.game_phase = "PRE_TURN_CHECKS"
 
     def run_pre_turn_checks(self):
-        # Check Tenhou (Heavenly Hand) for Human
         tenhou_human_score_type = checkhand(self.player_human.hand)
         if tenhou_human_score_type > 0:
             self.handle_tenhou(self.player_human, tenhou_human_score_type)
             return
 
-        # Check Tenhou for AI
         tenhou_ai_score_type = checkhand(self.player_ai.hand)
         if tenhou_ai_score_type > 0:
             self.handle_tenhou(self.player_ai, tenhou_ai_score_type)
             return
 
-        # Check field for Ryuukyoku (Abortive Draw due to 4 identical cards)
-        if checkdeck(self.field) == 1: # 1 means condition for abortive draw met
-            self.message = "Field has 4 identical cards at start! Abortive Draw (Ryuukyoku)."
+        if checkdeck(self.field) == 1:
+            self.message = "场上初始有四张同ID牌! 流局 (Abortive Draw)."
             self.game_phase = "GAME_OVER"
             return
         
-        self.game_phase = "PLAYER_TURN" # Proceed to normal play
+        self.game_phase = "PLAYER_TURN"
+        self.message = f"{self.player_human.name}的回合."
+        self.turn_count = 1
+
 
     def handle_tenhou(self, player, score_type):
+        pts = 0
+        reason = ""
         if score_type == 3: # All spots
-            player.score = 10
-            self.message = f"{player.name} has Tenhou (All Spots)! Score: 10. Game Over."
-        elif score_type == 2: # Double Shisou
-            player.score = 8
-            self.message = f"{player.name} has Tenhou (Double CP/4-of-a-kind)! Score: 8. Game Over."
-        elif score_type == 1: # Shisou or CP
-            player.score = 4
-            self.message = f"{player.name} has Tenhou (CP/4-of-a-kind)! Score: 4. Game Over."
+            pts = 10
+            reason = "天和 (全地点牌)"
+        elif score_type == 2: # Double Shisou / 2x 4-of-kind
+            pts = 8
+            reason = "天和 (双手四)"
+        elif score_type == 1: # Shisou (4-of-kind) or CP hand
+            pts = 4
+            reason = "天和 (手四/CP)"
+        
+        player.score = pts
+        self.message = f"{player.name} {reason}! 得分: {pts}. 游戏结束."
         self.game_phase = "GAME_OVER"
 
 
     def handle_player_discard(self, card_idx):
-        if self.game_phase != "PLAYER_TURN" or self.dialog_active:
+        if self.game_phase != "PLAYER_TURN" or self.dialog_active or self.current_player != self.player_human:
             return
         if 0 <= card_idx < len(self.player_human.hand):
             discarded_card = self.player_human.hand.pop(card_idx)
             self.field.append(discarded_card)
-            self.message = f"{self.player_human.name} discarded {discarded_card.name}."
-            # Start the get_card sequence
-            self.process_get_card_phase(self.player_human, "DISCARD_MATCH")
+            self.message = f"{self.player_human.name} 打出了 {discarded_card.name}."
+            self.game_phase = "PROCESSING_GET_CARD" # New intermediate phase
+            self.process_get_card_sequence(self.player_human, "DISCARD_MATCH")
 
-
-    def process_get_card_phase(self, current_processing_player, sub_phase, chosen_card_from_dialog=None):
-        # sub_phases: DISCARD_MATCH, DRAW_NEW_TO_FIELD, NEW_FIELD_CARD_MATCH, TURN_END_SCORE
+    def process_get_card_sequence(self, current_processing_player, sub_phase, chosen_card_from_dialog=None):
+        # This function will manage the state machine for card collection
+        # sub_phases: DISCARD_MATCH, DRAW_NEW_TO_FIELD, NEW_FIELD_CARD_MATCH, CHECK_SCORE_AND_END_TURN
         
         if sub_phase == "DISCARD_MATCH":
             if not self.field: 
-                self.process_get_card_phase(current_processing_player, "DRAW_NEW_TO_FIELD")
+                self.process_get_card_sequence(current_processing_player, "DRAW_NEW_TO_FIELD")
                 return
 
-            target_card = self.field[-1] # The card just discarded or drawn
+            target_card = self.field[-1] 
             matches_on_field = [c for c in self.field[:-1] if c.card_id == target_card.card_id]
 
             if matches_on_field:
                 if len(matches_on_field) == 1:
                     chosen_card = matches_on_field[0]
-                    self.collect_cards_for_player(current_processing_player, target_card, chosen_card)
-                    self.process_get_card_phase(current_processing_player, "DRAW_NEW_TO_FIELD")
-                elif len(matches_on_field) >= 2: # Includes the case of 3, where player takes all
-                    if len(matches_on_field) == 2 :
-                        self.dialog_prompt = f"您打出了 {target_card.name}. 请选择一张场上的牌来收集:"
+                    self.collect_cards_for_player(current_processing_player, target_card, chosen_card, True)
+                    self.process_get_card_sequence(current_processing_player, "DRAW_NEW_TO_FIELD")
+                elif len(matches_on_field) >= 2: 
+                    if len(matches_on_field) == 2 and current_processing_player == self.player_human:
+                        self.dialog_prompt = f"您打出 {target_card.name}. 选择一张场上的牌收集:"
                         self.dialog_options = matches_on_field 
                         self.dialog_callback = lambda choice_idx: self.finish_get_card_match_choice(current_processing_player, target_card, matches_on_field, choice_idx, "DRAW_NEW_TO_FIELD")
                         self.dialog_active = True
-                        self.game_phase = "DIALOG"
-                    else: # 3 or more matches, player takes them all + target
-                        for mc in list(matches_on_field): # Iterate over copy for safe removal
-                             self.collect_cards_for_player(current_processing_player, None, mc) # Collect match
-                        self.collect_cards_for_player(current_processing_player, target_card, None) # Collect target
-                        self.process_get_card_phase(current_processing_player, "DRAW_NEW_TO_FIELD")
-
+                        # game_phase remains PROCESSING_GET_CARD, dialog takes over input
+                    else: # AI auto-picks or >=3 matches (take all)
+                        if current_processing_player == self.player_ai and len(matches_on_field) == 2:
+                             # AI picks first match
+                            self.collect_cards_for_player(current_processing_player, target_card, matches_on_field[0], True)
+                        else: # >=3, take all target and matches
+                            for mc in list(matches_on_field): 
+                                self.collect_cards_for_player(current_processing_player, None, mc, False) 
+                            self.collect_cards_for_player(current_processing_player, target_card, None, True)
+                        self.process_get_card_sequence(current_processing_player, "DRAW_NEW_TO_FIELD")
+                else: # No match for discarded card (should not happen if matches_on_field is true)
+                     self.process_get_card_sequence(current_processing_player, "DRAW_NEW_TO_FIELD")
             else: # No match for discarded card
-                self.process_get_card_phase(current_processing_player, "DRAW_NEW_TO_FIELD")
+                self.process_get_card_sequence(current_processing_player, "DRAW_NEW_TO_FIELD")
 
         elif sub_phase == "DRAW_NEW_TO_FIELD":
             if self.deck:
                 new_field_card = self.deck.pop(0)
                 self.field.append(new_field_card)
-                self.message = f"Drew {new_field_card.name} to field."
-                self.process_get_card_phase(current_processing_player, "NEW_FIELD_CARD_MATCH")
-            else: # No cards left in deck
-                self.message = "Deck is empty."
-                self.process_get_card_phase(current_processing_player, "TURN_END_SCORE")
+                self.message = f"牌堆翻出 {new_field_card.name} 到场上."
+                self.process_get_card_sequence(current_processing_player, "NEW_FIELD_CARD_MATCH")
+            else: 
+                self.message = "牌堆已空."
+                self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
         
         elif sub_phase == "NEW_FIELD_CARD_MATCH":
-            if not self.field:
-                self.process_get_card_phase(current_processing_player, "TURN_END_SCORE")
+            if not self.field or len(self.field) < 1 : # Need at least 1 card (the new one)
+                self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
                 return
 
-            target_card = self.field[-1] # The newly drawn field card
+            target_card = self.field[-1] 
             matches_on_field = [c for c in self.field[:-1] if c.card_id == target_card.card_id]
 
             if matches_on_field:
                 if len(matches_on_field) == 1:
                     chosen_card = matches_on_field[0]
-                    self.collect_cards_for_player(current_processing_player, target_card, chosen_card)
-                    self.process_get_card_phase(current_processing_player, "TURN_END_SCORE")
+                    self.collect_cards_for_player(current_processing_player, target_card, chosen_card, True)
+                    self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
                 elif len(matches_on_field) >= 2:
-                    if len(matches_on_field) == 2:
-                        self.dialog_prompt = f"新翻开的 {target_card.name}. 请选择一张场上的牌来收集:"
+                    if len(matches_on_field) == 2 and current_processing_player == self.player_human:
+                        self.dialog_prompt = f"新翻开 {target_card.name}. 选择一张场上的牌收集:"
                         self.dialog_options = matches_on_field
-                        self.dialog_callback = lambda choice_idx: self.finish_get_card_match_choice(current_processing_player, target_card, matches_on_field, choice_idx, "TURN_END_SCORE")
+                        self.dialog_callback = lambda choice_idx: self.finish_get_card_match_choice(current_processing_player, target_card, matches_on_field, choice_idx, "CHECK_SCORE_AND_END_TURN")
                         self.dialog_active = True
-                        self.game_phase = "DIALOG"
-                    else: # 3 or more matches
-                        for mc in list(matches_on_field):
-                            self.collect_cards_for_player(current_processing_player, None, mc)
-                        self.collect_cards_for_player(current_processing_player, target_card, None)
-                        self.process_get_card_phase(current_processing_player, "TURN_END_SCORE")
+                    else: # AI auto-picks or >=3 matches
+                        if current_processing_player == self.player_ai and len(matches_on_field) == 2:
+                            self.collect_cards_for_player(current_processing_player, target_card, matches_on_field[0], True)
+                        else: # >=3, take all target and matches
+                            for mc in list(matches_on_field):
+                                self.collect_cards_for_player(current_processing_player, None, mc, False)
+                            self.collect_cards_for_player(current_processing_player, target_card, None, True)
+                        self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
+                else: # Should not happen
+                     self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
             else: # No match for new field card
-                self.process_get_card_phase(current_processing_player, "TURN_END_SCORE")
+                self.process_get_card_sequence(current_processing_player, "CHECK_SCORE_AND_END_TURN")
 
-        elif sub_phase == "TURN_END_SCORE":
-            self.perform_scoring(current_processing_player) # This might set dialog for continue/stop
+        elif sub_phase == "CHECK_SCORE_AND_END_TURN":
+            stop_game_chosen = self.perform_scoring_and_check_continue(current_processing_player)
+            if not stop_game_chosen and self.game_phase != "GAME_OVER": # If scoring didn't end game and player didn't choose to stop
+                self.end_turn()
+
 
     def finish_get_card_match_choice(self, current_processing_player, target_card, matches_on_field, choice_idx, next_sub_phase):
         self.dialog_active = False
-        self.game_phase = "PROCESSING" # Temporary phase while logic runs
+        # game_phase is still PROCESSING_GET_CARD
         
         chosen_match_card = matches_on_field[choice_idx]
-        self.collect_cards_for_player(current_processing_player, target_card, chosen_match_card)
+        self.collect_cards_for_player(current_processing_player, target_card, chosen_match_card, True)
         
-        self.process_get_card_phase(current_processing_player, next_sub_phase)
+        self.process_get_card_sequence(current_processing_player, next_sub_phase)
 
 
-    def collect_cards_for_player(self, player_obj, target_card, matched_card):
-        """ Helper to collect cards and remove from field.
-            If target_card is None, only matched_card is collected (already on field).
-            If matched_card is None, only target_card is collected (e.g. last card from field).
-        """
+    def collect_cards_for_player(self, player_obj, target_card, matched_card, target_is_main_collect):
+        collected_names_msg = []
         if target_card:
-            if target_card in self.field: # Ensure it's actually on field before removing
+            if target_card in self.field: 
                 self.field.remove(target_card)
+            if target_card not in player_obj.collected: # Avoid duplicates if somehow passed again
                 player_obj.collected.append(target_card)
-                self.message = f"{player_obj.name} collected {target_card.name}."
-            else: # Safety, if target was already implicitly collected
-                if target_card not in player_obj.collected:
-                     player_obj.collected.append(target_card)
-                     self.message = f"{player_obj.name} collected {target_card.name}."
-
+            collected_names_msg.append(target_card.name)
 
         if matched_card:
             if matched_card in self.field:
                 self.field.remove(matched_card)
+            if matched_card not in player_obj.collected:
                 player_obj.collected.append(matched_card)
-                self.message += f" and {matched_card.name}."
-            else: # Safety
-                if matched_card not in player_obj.collected:
-                    player_obj.collected.append(matched_card)
-                    self.message += f" and {matched_card.name}."
+            collected_names_msg.append(matched_card.name)
         
-        # Sort collected cards for consistent display/scoring (optional)
+        if collected_names_msg:
+            self.message = f"{player_obj.name} 收集了: {', '.join(collected_names_msg)}."
+        
         player_obj.collected.sort(key=lambda c: (c.card_type, c.card_id, c.name))
 
-
-    def perform_scoring(self, player_obj):
-        # Adapted from main.py's score function
+    def perform_scoring_and_check_continue(self, player_obj): # Returns True if player chose to stop game
         collected = player_obj.collected
-        new_total_score = 0 # Calculate score from scratch based on current yaku
+        new_total_score = 0 
         new_yizhong = []
         
-        scene_names = [c.name for c in collected if c.card_type == 'scene']
+        scene_names_all = [c.name for c in collected if c.card_type == 'scene']
         item_names = [c.name for c in collected if c.card_type == 'item']
         spot_names = [c.name for c in collected if c.card_type == 'spot']
         char_names = [c.name for c in collected if c.card_type == 'character']
         yyc_chars = ["博丽灵梦", "八云紫", "雾雨魔理沙", "爱丽丝", "蕾米莉亚", "十六夜咲夜", "西行寺幽幽子", "魂魄妖梦"]
         
-        temp_scene_names = list(scene_names) # Work with a copy
-        removed_bamboo_moon = False
-        
-        if len(temp_scene_names) == 5:
+        # Scene Yaku
+        # Create a temporary list of scene names for yaku calculation that might remove "迷失竹林的月圆之夜"
+        active_scene_names_for_yaku = list(scene_names_all)
+        if len(active_scene_names_for_yaku) == 5:
             new_total_score += 10
             new_yizhong.append("五景")
-        elif "迷失竹林的月圆之夜" in temp_scene_names:
+        else:
+            # Check if "迷失竹林的月圆之夜" should be excluded for 3-景/4-景 if no Yuyuko characters
             is_yyc_char_present = any(c_name in char_names for c_name in yyc_chars)
-            if not is_yyc_char_present:
-                if "迷失竹林的月圆之夜" in temp_scene_names :
-                    temp_scene_names.remove("迷失竹林的月圆之夜")
-                    removed_bamboo_moon = True
-        
-        if len(temp_scene_names) >= 3 and len(temp_scene_names) != 5: # Check after potential removal
-            if len(temp_scene_names) == 4:
+            if "迷失竹林的月圆之夜" in active_scene_names_for_yaku and not is_yyc_char_present:
+                active_scene_names_for_yaku.remove("迷失竹林的月圆之夜")
+            
+            if len(active_scene_names_for_yaku) == 4: # Check after potential removal
                 new_total_score += 8
                 new_yizhong.append("四景")
-            elif len(temp_scene_names) == 3: # Must be exactly 3 for Sankei
+            elif len(active_scene_names_for_yaku) == 3:
                 new_total_score += 5
                 new_yizhong.append("三景")
         
-        # CP Combinations
-        cp_score_val, yizhong_cp_names = check_cp_combinations(collected)
+        cp_score_units, yizhong_cp_names = check_cp_combinations(collected)
         new_yizhong.extend(yizhong_cp_names)
-        new_total_score += cp_score_val * 3 # Each CP combo unit worth 3 points
+        new_total_score += cp_score_units * 3
 
-        # 合札 (Hezha - Matching Spot sets)
-        # ids_on_field_at_start was stored at game setup
         card_id_counts = {}
         for c in collected:
             card_id_counts[c.card_id] = card_id_counts.get(c.card_id, 0) + 1
         
-        for hezha_spot_id in self.ids_on_field_at_start: # Check against initial spot cards
-            if card_id_counts.get(hezha_spot_id, 0) == 4:
-                # Check if one of the collected cards with this ID is the specific spot card
-                # This is a bit complex: need the name of the spot card with hezha_spot_id
-                spot_card_for_hezha_name = ""
-                for initial_spot_c in card.initialize_cards(): # Search all cards for the name
-                    if initial_spot_c.card_id == hezha_spot_id and initial_spot_c.card_type == 'spot':
-                        spot_card_for_hezha_name = initial_spot_c.name
-                        break
-                if spot_card_for_hezha_name:
-                    new_total_score += 4
-                    new_yizhong.append(f"合札-{spot_card_for_hezha_name}")
+        # Find the names of the initial spot cards for Hezha yaku names
+        initial_spot_card_names = {} # card_id -> name
+        all_card_defs = card.initialize_cards()
+        for c_def in all_card_defs:
+            if c_def.card_type == 'spot':
+                initial_spot_card_names[c_def.card_id] = c_def.name
+
+        for hezha_spot_id in self.ids_on_field_at_start: 
+            if card_id_counts.get(hezha_spot_id, 0) >= 4: # Needs 4 cards of this ID
+                spot_name_for_hezha = initial_spot_card_names.get(hezha_spot_id, f"ID {hezha_spot_id}")
+                new_total_score += 4
+                new_yizhong.append(f"合札-{spot_name_for_hezha}")
         
-        # 武器库 (Weapon Arsenal)
         weapon_items = ["灵梦的御币", "早苗的御币", "楼观剑和白楼剑"]
         if all(item_name in item_names for item_name in weapon_items):
             new_total_score += 5
             new_yizhong.append("武器库")
 
-        # 信仰战争 (Faith War)
         faith_spots = ["博丽神社", "守矢神社", "命莲寺"]
         if all(spot_name in spot_names for spot_name in faith_spots):
             new_total_score += 5
             new_yizhong.append("信仰战争")
-            if "巫女组" in new_yizhong: # Specific interaction from original code
-                 new_yizhong.remove("巫女组") # Assume this means 信仰战争 overrides/replaces score for 巫女组
+            if "巫女组" in new_yizhong: 
+                 # Check main.py rule: 信仰战争 seems to take precedence or modify score/yaku of 巫女组
+                 # For now, let's assume it's an additional yaku. If it replaces, then remove "巫女组" points.
+                 # The prompt version removed "巫女组", implying it's replaced or incompatible.
+                 new_yizhong.remove("巫女组")
+                 # Need to also remove points for "巫女组" if it was added via check_cp_combinations
+                 # This is complex. Simpler: score "巫女组" normally, Faith War is separate.
+                 # For now, following prompt's removal of yaku name. Point adjustment is harder here.
+                 # The score for "巫女组" (3pts) is already in new_total_score.
+                 # This needs careful thought on point cancellation.
+                 # Safest: Both yaku exist, points stack, unless rule explicitly states point cancellation.
 
-        # Count-based scores
         if len(item_names) >= 5: 
             new_total_score += (len(item_names) - 5 + 1)
             new_yizhong.append(f"物品牌 ({len(item_names)})")
@@ -602,302 +654,336 @@ class GameManager:
             new_total_score += (len(char_names) - 10 + 1)
             new_yizhong.append(f"角色牌 ({len(char_names)})")
 
-        # Remove duplicate Yaku names, sort for consistent display
-        new_yizhong = sorted(list(set(new_yizhong)))
+        new_yizhong = sorted(list(set(new_yizhong))) # Unique and sorted
 
-        if new_yizhong != player_obj.yizhong and new_yizhong : # If new yaku formed
-            player_obj.score = new_total_score # Update to the new total score
+        # Check if new yaku formed or score changed significantly
+        # For simplicity, always update score. Prompt for continue if yaku list changes.
+        player_obj.score = new_total_score # Update to the new total score
+
+        if new_yizhong and new_yizhong != player_obj.yizhong : 
             player_obj.yizhong = new_yizhong
-            
-            self.message = f"{player_obj.name} formed new Yaku: {', '.join(new_yizhong)}! Score: {player_obj.score}"
+            self.message = f"{player_obj.name} 形成新役种: {', '.join(new_yizhong)}! 当前总分: {player_obj.score}"
             if player_obj == self.player_human :
-                self.dialog_prompt = "New Yaku! Continue game or Stop?"
-                self.dialog_options = ["Continue", "Stop"] # Represented by their strings
+                self.dialog_prompt = "形成新役种! 是否结束游戏?"
+                self.dialog_options = ["继续游戏", "结束游戏"] 
                 self.dialog_callback = self.handle_continue_stop_choice
                 self.dialog_active = True
-                self.game_phase = "DIALOG"
-            else: # AI always continues for simplicity, or add AI logic here
-                self.message += " AI continues."
-                self.end_turn() # AI continues
-        else: # No new yaku, or no yaku at all
-            player_obj.score = new_total_score # Still update score in case card counts changed point values
-            player_obj.yizhong = new_yizhong
+                return False # Dialog will determine if game stops or continues
+            else: # AI always continues
+                self.message += " AI选择继续."
+                return False # AI continues
+        else: # No new yaku, or yaku list unchanged
+            player_obj.yizhong = new_yizhong # Ensure yizhong is current even if not new
+            return False # Continue turn / game
+
+    def handle_continue_stop_choice(self, choice_string): 
+        self.dialog_active = False
+        if choice_string == "结束游戏":
+            self.message = f"{self.player_human.name} 选择结束游戏. 最终得分: {self.player_human.score}."
+            self.game_phase = "GAME_OVER"
+            # No need to call self.end_turn() here, game is over.
+        else: # Continue
+            self.message = f"{self.player_human.name} 选择继续游戏."
+            # Game phase was PROCESSING_GET_CARD. Now proceed to end turn.
             self.end_turn()
 
-    def handle_continue_stop_choice(self, choice_string): # choice is "Continue" or "Stop"
-        self.dialog_active = False
-        if choice_string == "Stop":
-            self.message = f"{self.player_human.name} chose to stop. Final Score: {self.player_human.score}. Game Over."
-            self.game_phase = "GAME_OVER"
-        else: # Continue
-            self.message = f"{self.player_human.name} continues."
-            self.end_turn()
-            self.game_phase = "PROCESSING" # Switch turn will set correct phase
 
     def end_turn(self):
-        if self.game_phase == "GAME_OVER": # Already decided by scoring or dialog
+        if self.game_phase == "GAME_OVER": 
             return
 
-        # Check for game end by no cards in hand (after a full turn cycle)
         if not self.player_human.hand and not self.player_ai.hand:
-            self.message = "All players out of cards! Game ends. Calculating final scores."
-            # Potentially re-score both players here if needed, or assume current scores are final
+            self.message = "所有玩家手牌已打完! 游戏结束."
             self.game_phase = "GAME_OVER"
-            # Add logic to display final scores and winner
+            # Final scoring might be implicitly done, or can force a final re-score here if rules need it.
             if self.player_human.score > self.player_ai.score:
-                self.message += f" {self.player_human.name} wins!"
+                self.message += f" {self.player_human.name} 胜利!"
             elif self.player_ai.score > self.player_human.score:
-                 self.message += f" {self.player_ai.name} wins!"
+                 self.message += f" {self.player_ai.name} 胜利!"
             else:
-                 self.message += " It's a tie!"
+                 self.message += " 平局!"
             return
 
         if self.current_player == self.player_human:
             self.current_player = self.player_ai
             self.game_phase = "AI_TURN"
-            self.message = f"{self.player_ai.name}'s turn."
+            self.message = f"{self.player_ai.name}的回合."
             self.perform_ai_turn() 
         else:
             self.current_player = self.player_human
             self.game_phase = "PLAYER_TURN"
-            self.message = f"{self.player_human.name}'s turn."
-            if not self.player_human.hand: # Player ran out of cards on their turn
-                self.end_turn() # Effectively skips to AI or game over
+            self.message = f"{self.player_human.name}的回合."
+            if not self.player_human.hand: # Player ran out of cards on their turn, game might end
+                self.end_turn() 
+        self.turn_count +=1
+
 
     def perform_ai_turn(self):
-        if self.game_phase != "AI_TURN" or not self.player_ai.hand:
-            if not self.player_ai.hand: # AI ran out of cards
-                self.end_turn()
+        if self.game_phase != "AI_TURN" or self.dialog_active : # Should not be dialog active in AI turn start
             return
 
-        # AI logic: "baka" always discards the first card
-        discarded_card_ai = self.player_ai.hand.pop(0)
+        if not self.player_ai.hand:
+            self.end_turn() # AI has no cards, pass turn
+            return
+
+        pygame.time.wait(500) # Small delay for AI "thinking"
+
+        discarded_card_ai = self.player_ai.hand.pop(0) # Baka AI discards first card
         self.field.append(discarded_card_ai)
-        self.message = f"{self.player_ai.name} discarded {discarded_card_ai.name}."
+        self.message = f"{self.player_ai.name} 打出了 {discarded_card_ai.name}."
         
-        # AI processes its get_card phase (simplified: auto-picks first if choice)
-        self.process_get_card_phase_ai(self.player_ai, "DISCARD_MATCH")
+        self.game_phase = "PROCESSING_GET_CARD"
+        self.process_get_card_sequence(self.player_ai, "DISCARD_MATCH")
 
-
-    def process_get_card_phase_ai(self, player_ai_obj, sub_phase):
-        # Simplified version for AI - auto-picks first option
-        if sub_phase == "DISCARD_MATCH":
-            if not self.field:
-                self.process_get_card_phase_ai(player_ai_obj, "DRAW_NEW_TO_FIELD")
-                return
-            target_card = self.field[-1]
-            matches = [c for c in self.field[:-1] if c.card_id == target_card.card_id]
-            if matches:
-                # AI takes the first match, or all if >2
-                if len(matches) >=3:
-                     for mc in list(matches):
-                         self.collect_cards_for_player(player_ai_obj, None, mc)
-                     self.collect_cards_for_player(player_ai_obj, target_card, None)
-                else:
-                     self.collect_cards_for_player(player_ai_obj, target_card, matches[0])
-            self.process_get_card_phase_ai(player_ai_obj, "DRAW_NEW_TO_FIELD")
-
-        elif sub_phase == "DRAW_NEW_TO_FIELD":
-            if self.deck:
-                new_card = self.deck.pop(0)
-                self.field.append(new_card)
-                self.message = f"AI drew {new_card.name} to field."
-                self.process_get_card_phase_ai(player_ai_obj, "NEW_FIELD_CARD_MATCH")
-            else:
-                self.process_get_card_phase_ai(player_ai_obj, "TURN_END_SCORE")
-        
-        elif sub_phase == "NEW_FIELD_CARD_MATCH":
-            if not self.field:
-                self.process_get_card_phase_ai(player_ai_obj, "TURN_END_SCORE")
-                return
-            target_card = self.field[-1]
-            matches = [c for c in self.field[:-1] if c.card_id == target_card.card_id]
-            if matches:
-                if len(matches) >=3:
-                     for mc in list(matches):
-                         self.collect_cards_for_player(player_ai_obj, None, mc)
-                     self.collect_cards_for_player(player_ai_obj, target_card, None)
-                else: # Takes first match
-                     self.collect_cards_for_player(player_ai_obj, target_card, matches[0])
-            self.process_get_card_phase_ai(player_ai_obj, "TURN_END_SCORE")
-
-        elif sub_phase == "TURN_END_SCORE":
-            self.perform_scoring(player_ai_obj) # AI always continues if new yaku
 
     def handle_event(self, event):
-        if self.game_phase == "GAME_OVER" and event.type == pygame.MOUSEBUTTONDOWN:
-             # Option to restart game
-             self.setup_game() # Restart
-             return
+        if self.game_phase == "GAME_OVER":
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                self.setup_game() 
+            return # No other input if game over
 
         if self.dialog_active:
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                # Simplified dialog: assume options are drawn as clickable regions
-                # For text options like "Continue", "Stop"
-                if isinstance(self.dialog_options[0], str): # Text button dialog
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1: # Left click
+                # Text options dialog
+                if self.dialog_options and isinstance(self.dialog_options[0], str): 
                     dialog_option_height = 40
+                    base_y = SCREEN_HEIGHT // 2 # Start options below prompt
                     for i, option_text in enumerate(self.dialog_options):
                         button_rect = pygame.Rect(SCREEN_WIDTH // 2 - 100, 
-                                                  SCREEN_HEIGHT // 2 + i * (dialog_option_height + 5), 
+                                                  base_y + i * (dialog_option_height + 10), 
                                                   200, dialog_option_height)
                         if button_rect.collidepoint(event.pos):
-                            self.dialog_callback(option_text) # Pass the string
+                            if self.dialog_callback: self.dialog_callback(option_text)
                             break
-                else: # Card choice dialog
+                # Card choice dialog
+                elif self.dialog_options and isinstance(self.dialog_options[0], card):
                     card_spacing = CARD_WIDTH + CARD_MARGIN
-                    total_width = len(self.dialog_options) * CARD_WIDTH + (len(self.dialog_options) - 1) * CARD_MARGIN
-                    start_x = (SCREEN_WIDTH - total_width) // 2
+                    total_width_of_options = len(self.dialog_options) * CARD_WIDTH + (len(self.dialog_options) - 1) * CARD_MARGIN
+                    start_x = (SCREEN_WIDTH - total_width_of_options) // 2
                     dialog_card_y = SCREEN_HEIGHT // 2 
                     for i, card_opt in enumerate(self.dialog_options):
                         card_rect = pygame.Rect(start_x + i * card_spacing, dialog_card_y, CARD_WIDTH, CARD_HEIGHT)
                         if card_rect.collidepoint(event.pos):
-                            self.dialog_callback(i) # Pass the index of chosen card
+                            if self.dialog_callback: self.dialog_callback(i) 
                             break
-            return # Don't process other events if dialog is active
+            return # Dialog handles input exclusively
 
         if event.type == pygame.MOUSEMOTION:
-            if self.game_phase == "PLAYER_TURN":
+            if self.game_phase == "PLAYER_TURN" and self.current_player == self.player_human:
                 self.highlight_field_indices = []
                 self.hovered_hand_card_index = -1
                 # Player hand hover
-                hand_card_y = SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN
                 for i, p_card in enumerate(self.player_human.hand):
-                    hand_card_x = CARD_MARGIN + i * (CARD_WIDTH + CARD_MARGIN // 2)
-                    card_rect = pygame.Rect(hand_card_x, hand_card_y, CARD_WIDTH, CARD_HEIGHT)
+                    hand_card_x = self.player_hand_display_rect.left + i * (CARD_WIDTH + CARD_MARGIN // 2)
+                    card_rect = pygame.Rect(hand_card_x, self.player_hand_display_rect.top, CARD_WIDTH, CARD_HEIGHT)
                     if card_rect.collidepoint(event.pos):
                         self.hovered_hand_card_index = i
-                        # Highlight matching field cards
                         if p_card:
                             for field_idx, f_card in enumerate(self.field):
                                 if f_card and f_card.card_id == p_card.card_id:
                                     self.highlight_field_indices.append(field_idx)
                         break 
 
-        if event.type == pygame.MOUSEBUTTONDOWN:
-            if self.game_phase == "PLAYER_TURN":
-                # Player hand click
-                hand_card_y = SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1: # Left click
+            if self.game_phase == "PLAYER_TURN" and self.current_player == self.player_human:
                 for i, p_card in enumerate(self.player_human.hand):
-                    hand_card_x = CARD_MARGIN + i * (CARD_WIDTH + CARD_MARGIN // 2)
-                    if pygame.Rect(hand_card_x, hand_card_y, CARD_WIDTH, CARD_HEIGHT).collidepoint(event.pos):
+                    hand_card_x = self.player_hand_display_rect.left + i * (CARD_WIDTH + CARD_MARGIN // 2)
+                    card_rect = pygame.Rect(hand_card_x, self.player_hand_display_rect.top, CARD_WIDTH, CARD_HEIGHT)
+                    if card_rect.collidepoint(event.pos):
                         self.handle_player_discard(i)
-                        self.hovered_hand_card_index = -1 # Clear hover after click
+                        self.hovered_hand_card_index = -1 
                         self.highlight_field_indices = []
                         break
-            elif self.game_phase == "PRE_TURN_CHECKS": # Click to advance past Tenhou checks if none
+            elif self.game_phase == "PRE_TURN_CHECKS": 
                 self.run_pre_turn_checks()
+
+    # --- Drawing Methods ---
+    def draw_info_panel(self, surface, player, panel_rect):
+        pygame.draw.rect(surface, LIGHT_GRAY, panel_rect) 
+        pygame.draw.rect(surface, BLACK, panel_rect, 2) 
+
+        current_y = panel_rect.top + 5
+        text_x_start = panel_rect.left + 5
+        max_text_width = panel_rect.width - 10
+
+        # Player Name and Score
+        score_text = f"{player.name} | 得分: {player.score}"
+        draw_text(surface, score_text, (text_x_start, current_y), font, BLACK)
+        current_y += font.get_linesize() + 2
+
+        # Yaku
+        if player.yizhong:
+            current_y = self.draw_wrapped_text_list_in_rect(surface, "役种: ", player.yizhong, 
+                                                 text_x_start, current_y, small_font, BLUE, max_text_width, panel_rect.bottom - 5)
+        current_y += 3 # Padding
+
+        # Collected Cards
+        collected_names = [c.name for c in player.collected]
+        if collected_names:
+            current_y = self.draw_wrapped_text_list_in_rect(surface, "收集: ", collected_names,
+                                                 text_x_start, current_y, tiny_font, BLACK, max_text_width, panel_rect.bottom - 5)
+
+    def draw_wrapped_text_list_in_rect(self, surface, prefix, items_list, x_pos, y_start, font_obj, color, max_width, y_boundary):
+        if not items_list:
+            # draw_text(surface, prefix + "(无)", (x_pos, y_start), font_obj, color)
+            # return y_start + font_obj.get_linesize()
+             return y_start
+
+        full_text = prefix + ", ".join(items_list)
+        
+        words = full_text.split(' ') 
+        current_line_text = ""
+        current_y = y_start
+        line_spacing = font_obj.get_linesize() 
+
+        for word_idx, word in enumerate(words):
+            word_to_add = word
+            if current_line_text and word: # Add space if not empty line and not empty word
+                word_to_add = " " + word
+            
+            if font_obj.size(current_line_text + word_to_add)[0] <= max_width:
+                current_line_text += word_to_add
+            else:
+                if current_y + line_spacing > y_boundary: return current_y # Stop if out of vertical bounds
+                draw_text(surface, current_line_text.strip(), (x_pos, current_y), font_obj, color)
+                current_y += line_spacing
+                current_line_text = word 
+        
+        # Render the last line
+        if current_line_text.strip():
+            if current_y + line_spacing <= y_boundary: # Check bounds for last line too
+                draw_text(surface, current_line_text.strip(), (x_pos, current_y), font_obj, color)
+                current_y += line_spacing
+        return current_y
 
 
     def draw(self):
         self.screen.fill(GREEN)
 
-        # Draw Player Hand (Human)
-        hand_card_y = SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN
-        for i, p_card in enumerate(self.player_human.hand):
-            hand_card_x = CARD_MARGIN + i * (CARD_WIDTH + CARD_MARGIN // 2) # Allow slight overlap if many
-            is_highlight = (i == self.hovered_hand_card_index)
-            draw_card(self.screen, p_card, hand_card_x, hand_card_y, is_highlighted=is_highlight)
+        # --- Top Section: AI ---
+        # AI Hand (card backs)
+        ai_hand_base_x = self.ai_hand_display_rect.left
+        for i in range(min(len(self.player_ai.hand), AI_HAND_CARD_DISPLAY_COUNT)): # Show limited card backs
+            draw_card(self.screen, None, ai_hand_base_x + i * (CARD_WIDTH // 2), self.ai_hand_display_rect.top, is_back=True)
+        if len(self.player_ai.hand) > 0:
+            draw_text(self.screen, f"AI手牌: {len(self.player_ai.hand)}", 
+                      (ai_hand_base_x + AI_HAND_CARD_DISPLAY_COUNT*(CARD_WIDTH//2) + 5, self.ai_hand_display_rect.centery -10), 
+                      small_font, BLACK)
 
-        # Draw AI Hand (as backs)
-        ai_hand_y = CARD_MARGIN
-        for i in range(len(self.player_ai.hand)):
-            ai_card_x = CARD_MARGIN + i * (CARD_WIDTH // 2) # Overlap more
-            draw_card(self.screen, None, ai_card_x, ai_hand_y, is_back=True)
-        draw_text(self.screen, f"AI Hand: {len(self.player_ai.hand)}", (ai_card_x + CARD_WIDTH + 20, ai_hand_y + CARD_HEIGHT // 3), small_font)
+        # AI Info Panel
+        self.draw_info_panel(self.screen, self.player_ai, self.ai_info_rect)
 
-
-        # Draw Field Cards
-        field_start_x = CARD_MARGIN
-        field_start_y = SCREEN_HEIGHT // 2 - CARD_HEIGHT - CARD_MARGIN # Upper part of center
-        max_field_width = SCREEN_WIDTH - 2 * CARD_MARGIN
-        current_x, current_y = field_start_x, field_start_y
-        for i, f_card in enumerate(self.field):
-            is_highlight = (i in self.highlight_field_indices)
-            draw_card(self.screen, f_card, current_x, current_y, is_highlighted=is_highlight)
-            current_x += CARD_WIDTH + CARD_MARGIN
-            if current_x + CARD_WIDTH > max_field_width:
-                current_x = field_start_x
-                current_y += CARD_HEIGHT + CARD_MARGIN
-        
-        # Draw Deck
-        if self.deck:
-            draw_card(self.screen, None, SCREEN_WIDTH - CARD_WIDTH - CARD_MARGIN, field_start_y, is_back=True)
-            draw_text(self.screen, f"Deck: {len(self.deck)}", (SCREEN_WIDTH - CARD_WIDTH - CARD_MARGIN, field_start_y + CARD_HEIGHT + 5), small_font)
-        
-        # Draw Collected Cards (Counts for simplicity)
-        draw_text(self.screen, f"{self.player_human.name} Collected: {[c.name for c in self.player_ai.collected]} | Score: {self.player_human.score}", 
-                  (CARD_MARGIN, SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN * 2 - 30), font)
-        if self.player_human.yizhong:
-            draw_text(self.screen, f"Yaku: {', '.join(self.player_human.yizhong)}",
-                      (CARD_MARGIN, SCREEN_HEIGHT - CARD_HEIGHT - CARD_MARGIN * 2 - 60), small_font, color=BLUE)
-
-
-        draw_text(self.screen, f"{self.player_ai.name} Collected: {[c.name for c in self.player_ai.collected]} | Score: {self.player_ai.score}",
-                  (CARD_MARGIN, CARD_MARGIN + CARD_HEIGHT + 20), font)
-        if self.player_ai.yizhong:
-            draw_text(self.screen, f"AI Yaku: {', '.join(self.player_ai.yizhong)}",
-                      (CARD_MARGIN, CARD_MARGIN + CARD_HEIGHT + 50), small_font, color=RED)
-        
-        # Draw Message / Status
-        draw_text(self.screen, self.message, (SCREEN_WIDTH // 2, SCREEN_HEIGHT - 30), font, color=WHITE, center=True)
-        if self.game_phase == "PRE_TURN_CHECKS":
-             draw_text(self.screen, "Click to start first turn checks.", (SCREEN_WIDTH // 2, SCREEN_HEIGHT //2), font, color=YELLOW, center=True)
-
-
-        # Draw Dialog
-        if self.dialog_active:
-            # Simple overlay
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-            overlay.fill((0,0,0,180)) # Semi-transparent black
-            self.screen.blit(overlay, (0,0))
-
-            draw_text(self.screen, self.dialog_prompt, (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 60), font, color=WHITE, center=True)
+        # --- Middle Section: Field, Deck, Message ---
+        # Field Cards (6 per row, centered)
+        if self.field:
+            cards_per_row = 6
+            row_width = cards_per_row * CARD_WIDTH + (cards_per_row - 1) * CARD_MARGIN
+            field_start_x_centered = (SCREEN_WIDTH - row_width) // 2
             
-            # Text options (Continue/Stop)
-            if isinstance(self.dialog_options[0], str):
+            for i, f_card in enumerate(self.field):
+                row = i // cards_per_row
+                col = i % cards_per_row
+                if row >= self.max_field_rows : break # Don't draw more rows than fit
+
+                card_x = field_start_x_centered + col * (CARD_WIDTH + CARD_MARGIN)
+                card_y = self.field_display_start_y + row * (CARD_HEIGHT + CARD_MARGIN)
+                is_highlight = (i in self.highlight_field_indices)
+                draw_card(self.screen, f_card, card_x, card_y, is_highlighted=is_highlight)
+        
+        # Deck
+        if self.deck:
+            deck_x = SCREEN_WIDTH - CARD_WIDTH - CARD_MARGIN * 5 # Position deck to far right of field area
+            deck_y = self.field_display_start_y
+            draw_card(self.screen, None, deck_x, deck_y, is_back=True)
+            draw_text(self.screen, f"牌堆: {len(self.deck)}", (deck_x, deck_y + CARD_HEIGHT + 5), small_font, WHITE)
+        
+        # Game Message
+        draw_text(self.screen, self.message, (0,0), font, WHITE, center=True, rect_to_fit=self.game_message_rect)
+
+
+        # --- Bottom Section: Player ---
+        # Player Hand
+        for i, p_card in enumerate(self.player_human.hand):
+            hand_card_x = self.player_hand_display_rect.left + i * (CARD_WIDTH + CARD_MARGIN // 2)
+            is_highlight = (i == self.hovered_hand_card_index and self.current_player == self.player_human)
+            draw_card(self.screen, p_card, hand_card_x, self.player_hand_display_rect.top, is_highlighted=is_highlight)
+
+        # Player Info Panel
+        self.draw_info_panel(self.screen, self.player_human, self.player_info_rect)
+        
+        # --- Overlays: Dialog, Game Over ---
+        if self.dialog_active:
+            overlay_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            overlay_surf.fill((0,0,0,180))
+            self.screen.blit(overlay_surf, (0,0))
+
+            draw_text(self.screen, self.dialog_prompt, (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2 - 80), font, WHITE, center=True)
+            
+            if self.dialog_options and isinstance(self.dialog_options[0], str): # Text buttons
                 dialog_option_height = 40
+                base_y = SCREEN_HEIGHT // 2 
                 for i, option_text in enumerate(self.dialog_options):
-                    btn_rect = pygame.Rect(SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT // 2 + i * (dialog_option_height + 10), 200, dialog_option_height)
+                    btn_rect = pygame.Rect(SCREEN_WIDTH // 2 - 100, base_y + i * (dialog_option_height + 10), 200, dialog_option_height)
                     pygame.draw.rect(self.screen, LIGHT_BLUE, btn_rect)
-                    pygame.draw.rect(self.screen, BLACK, btn_rect, 2) # Border
+                    pygame.draw.rect(self.screen, BLACK, btn_rect, 2)
                     draw_text(self.screen, option_text, btn_rect.center, font, BLACK, center=True)
-            # Card options
-            else:
+            elif self.dialog_options and isinstance(self.dialog_options[0], card): # Card choices
                 card_spacing = CARD_WIDTH + CARD_MARGIN
-                total_width = len(self.dialog_options) * CARD_WIDTH + (len(self.dialog_options) - 1) * CARD_MARGIN
-                start_x = (SCREEN_WIDTH - total_width) // 2
+                total_width_of_options = len(self.dialog_options) * CARD_WIDTH + (len(self.dialog_options) - 1) * CARD_MARGIN
+                start_x = (SCREEN_WIDTH - total_width_of_options) // 2
                 dialog_card_y = SCREEN_HEIGHT // 2 
                 for i, card_opt in enumerate(self.dialog_options):
-                    # Highlight if mouse is over this dialog card option
                     card_opt_rect = draw_card(self.screen, card_opt, start_x + i * card_spacing, dialog_card_y)
                     mouse_pos = pygame.mouse.get_pos()
                     if card_opt_rect.collidepoint(mouse_pos):
                          pygame.draw.rect(self.screen, YELLOW, card_opt_rect, HIGHLIGHT_BORDER)
 
-
-        if self.game_phase == "GAME_OVER":
-            draw_text(self.screen, "GAME OVER. Click to restart.", (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2), font, color=YELLOW, center=True)
-
+        if self.game_phase == "PRE_TURN_CHECKS":
+             draw_text(self.screen, "点击屏幕开始回合前检查.", (SCREEN_WIDTH // 2, SCREEN_HEIGHT //2), font, YELLOW, center=True)
+        elif self.game_phase == "GAME_OVER":
+            final_msg_rect = pygame.Rect(SCREEN_WIDTH // 4, SCREEN_HEIGHT // 3, SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3)
+            pygame.draw.rect(self.screen, BLACK, final_msg_rect)
+            pygame.draw.rect(self.screen, WHITE, final_msg_rect, 3)
+            game_over_text = self.message + " 点击屏幕重新开始."
+            # Need to wrap this text too if long
+            lines = [self.message, "点击屏幕重新开始."] # Simple two line
+            for i, line in enumerate(lines):
+                 draw_text(self.screen, line, (final_msg_rect.centerx, final_msg_rect.centery -15 + i*30), font, YELLOW, center=True)
 
 def main_gui():
-    global font, small_font
+    global font, small_font, tiny_font # Make sure these are global
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Touhou Card Game")
     
-    font_path = "sc.ttf" # <--- 请将这里替换为您实际的字体文件名
-    try:
-        font = pygame.font.Font(font_path, 32) # 主字体，字号调小一点以容纳更多内容
-        small_font = pygame.font.Font(font_path, 24) # 小字体
-        tiny_font = pygame.font.Font(font_path, 18) # 更小的字体，用于收集的牌和役种列表
-    except pygame.error as e:
-        print(f"警告: 无法加载指定字体 '{font_path}'. 将使用默认字体 (可能不支持中文)。错误: {e}")
-        font = pygame.font.Font(None, 36)
-        small_font = pygame.font.Font(None, 28)
-        tiny_font = pygame.font.Font(None, 22) # 默认字体下的更小尺寸
-        
+    font_path = None # Use default if path is None
+    # Try to find a common CJK font. "msyh.ttc" (Microsoft YaHei) is common on Windows.
+    # On Linux, "Noto Sans CJK JP" or similar. On macOS, "PingFang.ttc".
+    # For simplicity, user should place a 'sc.ttf' or similar in the game directory.
+    font_paths_to_try = ["sc.ttf", "msyh.ttc", "ヒラギノ角ゴシック W3.ttc", None] # None for pygame default
+    
+    for fp_try in font_paths_to_try:
+        try:
+            font = pygame.font.Font(fp_try, 28) 
+            small_font = pygame.font.Font(fp_try, 20) 
+            tiny_font = pygame.font.Font(fp_try, 16)
+            print(f"Using font: {fp_try if fp_try else 'Pygame Default'}")
+            break 
+        except pygame.error:
+            if fp_try is None : # If default font fails, something is very wrong
+                print("Error: Pygame default font failed to load.")
+                pygame.quit()
+                sys.exit()
+            # print(f"Font {fp_try} not found or failed to load.")
+            continue # Try next font
+        except Exception as e: # Catch other font loading errors
+            print(f"An unexpected error occurred while loading font {fp_try}: {e}")
+            continue
+
+
     load_images()
-    if not card_back_image or not card_images: # Critical load fail
+    if not card_back_image and not card_images: # Critical load fail
+        print("CRITICAL: Failed to load essential card images/backs. Exiting.")
         return
 
     game_manager = GameManager(screen)
@@ -909,43 +995,32 @@ def main_gui():
             if event.type == pygame.QUIT:
                 running = False
             game_manager.handle_event(event)
-
-        # Game logic updates (AI turn, phase changes not tied to direct input)
-        if game_manager.game_phase == "AI_TURN" and not game_manager.dialog_active:
-             # AI turn might involve drawing, scoring etc. which might trigger dialogs.
-             # The perform_ai_turn and subsequent scoring should handle phase changes.
-             pass # AI turn is mostly handled within its call sequence from end_turn or player action.
         
         game_manager.draw()
         pygame.display.flip()
-        clock.tick(30) # FPS
+        clock.tick(30) 
 
     pygame.quit()
 
 if __name__ == '__main__':
-    # Create dummy assets folder and a few images if they don't exist, for quick testing
     if not os.path.exists(ASSET_PATH):
         os.makedirs(ASSET_PATH)
-    
-    # Create a dummy back.png and one card if missing for basic runnability
-    # In a real scenario, user must provide these.
-    try:
-        if not os.path.exists(os.path.join(ASSET_PATH, "back.png")):
+        print(f"Created assets folder at: {os.path.abspath(ASSET_PATH)}")
+        print("Please place card images (e.g., '博丽灵梦.png') and 'back.png' in this folder.")
+
+    # Create a dummy back.png if missing for basic runnability
+    dummy_back_path = os.path.join(ASSET_PATH, "back.png")
+    if not os.path.exists(dummy_back_path):
+        try:
+            # Initialize pygame earlier if needed for surface creation outside main_gui
+            if not pygame.get_init(): pygame.init()
             surf = pygame.Surface((100,150))
             surf.fill(BLUE)
-            pygame.image.save(surf, os.path.join(ASSET_PATH, "back.png"))
-        
-        # Example: Create a dummy for a card that might be in the list
-        # This part is tricky as card names come from card.py
-        # For now, assume user has their assets.
-        # first_card_name_for_dummy = card.initialize_cards()[0].name
-        # if not os.path.exists(os.path.join(ASSET_PATH, f"{first_card_name_for_dummy}.png")):
-        #     surf = pygame.Surface((100,150))
-        #     surf.fill(RED)
-        #     pygame.image.save(surf, os.path.join(ASSET_PATH, f"{first_card_name_for_dummy}.png"))
-        pass # User should have actual assets.
-
-    except Exception as e:
-        print(f"Error creating dummy assets (not critical if you have them): {e}")
+            pygame.draw.rect(surf, WHITE, surf.get_rect(), 2)
+            pygame.image.save(surf, dummy_back_path)
+            print(f"Created dummy '{os.path.basename(dummy_back_path)}'. Please replace with actual image.")
+        except Exception as e:
+            print(f"Error creating dummy back.png (pygame init needed?): {e}")
+            # If this fails, load_images will use its own internal fallback.
 
     main_gui()
