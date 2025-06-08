@@ -199,13 +199,13 @@ PLAYER_HAND_MAX_WIDTH = (CARD_WIDTH + CARD_MARGIN // 2) * 8 - CARD_MARGIN // 2
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-GREEN = (0, 100, 0) 
+BACKGROUND = (173, 216, 230)
 GRAY = (200, 200, 200)
-LIGHT_GRAY = (230, 230, 230)
-RED = (200, 0, 0)
-BLUE = (0, 0, 200)
-YELLOW = (255, 255, 0)
-LIGHT_BLUE = (173, 216, 230)
+LIGHT_GRAY = (176,224,230)
+RED = (230, 0, 0)
+BLUE = (30, 144, 255)
+YELLOW = (255, 153, 18)
+LIGHT_BLUE = (255,255,255)
 
 ASSET_PATH = resource_path("assets/cards")
 card_images = {}
@@ -721,7 +721,7 @@ class GameManager:
         return current_y
 
     def draw(self):
-        self.screen.fill(GREEN)
+        self.screen.fill(BACKGROUND)
         # AI Hand & Info
         ai_hand_base_x = self.ai_hand_display_rect.left
         for i in range(min(len(self.player_ai.hand), AI_HAND_CARD_DISPLAY_COUNT)):
@@ -813,7 +813,7 @@ def main_gui():
                 elif daichan_button.collidepoint(event.pos):
                     ai_difficulty = 'daichan'; selection_done = True
         
-        screen.fill(GREEN)
+        screen.fill(BACKGROUND)
         draw_text(screen, "选择AI难度 (Choose AI Difficulty)", (SCREEN_WIDTH/2, SCREEN_HEIGHT/2 - 100), font, WHITE, center=True)
         
         pygame.draw.rect(screen, LIGHT_BLUE, baka_button); pygame.draw.rect(screen, BLACK, baka_button, 2)
